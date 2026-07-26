@@ -1,4 +1,5 @@
-from src.models.user_model import db, User
+from src.data import db
+from src.models.user_model import User
 
 def register_user(username, email, password):
     if User.query.filter_by(username=username).first() or User.query.filter_by(email=email).first():

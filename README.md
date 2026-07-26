@@ -21,6 +21,7 @@ auth_service/
 ├── requirements.txt    # Dépendances Python
 └── src/
     ├── __init__.py
+    ├── data.py         # Initialisation de l'objet SQLAlchemy 'db'
     ├── models/         # Définition des modèles de données (ex: User)
     │   └── user_model.py
     ├── routes/         # Définition des routes API pour chaque fonctionnalité

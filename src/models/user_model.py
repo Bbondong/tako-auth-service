@@ -1,7 +1,5 @@
-from flask_sqlalchemy import SQLAlchemy
+from src.data import db
 from werkzeug.security import generate_password_hash, check_password_hash
-
-db = SQLAlchemy() # Initialisation différée
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)

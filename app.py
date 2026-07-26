@@ -1,5 +1,5 @@
 from flask import Flask
-from src.models.user_model import db
+from src.data import db
 from src.routes.login import login_bp
 from src.routes.register import register_bp
 from src.routes.forgot_password import forgot_password_bp
