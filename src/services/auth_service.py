@@ -1,7 +1,11 @@
+import os
 import logging
 import time
+import uuid  # <-- Importation pour générer l'identifiant unique
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
+import cloudinary
+import cloudinary.uploader
 from src.data import fetch_one, Database 
 
 # ==========================================
@@ -11,21 +15,27 @@ from src.data import fetch_one, Database
 # Configuration du logger serveur pour la traçabilité de la sécurité
 logger = logging.getLogger("auth_service")
 
-# Messages génériques renvoyés au client HTTP (Prévention contre l'énumération)
+# Configuration de Cloudinary via les variables d'environnement
+cloudinary.config(
+    cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.environ.get("CLOUDINARY_API_KEY"),
+    api_secret=os.environ.get("CLOUDINARY_API_SECRET"),
+    secure=True
+)
+
+# Messages génériques renvoyés au client HTTP
 GENERIC_REGISTRATION_ERROR = "Impossible de procéder à l'inscription avec ces informations. Veuillez vérifier vos données."
 GENERIC_LOGIN_ERROR = "Identifiants ou mot de passe incorrects."
 
 # Configuration Anti Brute-Force
-MAX_FAILED_ATTEMPTS = 5       # Nombre maximum d'échecs autorisés avant blocage
-LOCKOUT_TIME_SECONDS = 300    # Temps de blocage en secondes (300s = 5 minutes)
+MAX_FAILED_ATTEMPTS = 5       
+LOCKOUT_TIME_SECONDS = 300    
 
-# Dictionnaire en mémoire pour stocker les tentatives échouées
-# Format attendu : {'email_ou_tel': {'count': 2, 'lock_until': 0}}
 failed_logins = {}
 
 
 # ==========================================
-# 2. FONCTIONS UTILITAIRES (SÉCURITÉ)
+# 2. FONCTIONS UTILITAIRES (SÉCURITÉ & CLOUD)
 # ==========================================
 
 def _record_failed_attempt(identifier):
@@ -40,26 +50,56 @@ def _record_failed_attempt(identifier):
     else:
         failed_logins[identifier]['count'] += 1
 
-    # Verrouillage si la limite est atteinte
     if failed_logins[identifier]['count'] >= MAX_FAILED_ATTEMPTS:
         failed_logins[identifier]['lock_until'] = current_time + LOCKOUT_TIME_SECONDS
-        logger.warning(f"[SECURITY - ACCOUNT LOCKED] L'identifiant {identifier} a été bloqué temporairement suite à {MAX_FAILED_ATTEMPTS} échecs.")
+        logger.warning(f"[SECURITY - ACCOUNT LOCKED] L'identifiant {identifier} a été bloqué temporairement.")
+
+
+def upload_to_cloudinary(file_obj, folder_name, file_name):
+    """
+    Upload un fichier image vers Cloudinary dans un dossier précis et avec un nom précis.
+    """
+    try:
+        if not file_obj:
+            return None, "Aucun fichier d'image fourni."
+
+        if hasattr(file_obj, 'seek'):
+            file_obj.seek(0)
+
+        # Envoi à Cloudinary (folder = dossier, public_id = nom du fichier)
+        upload_result = cloudinary.uploader.upload(
+            file_obj,
+            folder=folder_name,
+            public_id=file_name,
+            resource_type="image"
+        )
+
+        secure_url = upload_result.get("secure_url")
+        if not secure_url:
+            return None, "Échec de récupération de l'URL sur Cloudinary."
+
+        return secure_url, None
+
+    except Exception as e:
+        logger.error(f"[CLOUDINARY ERROR] Échec de l'upload vers {folder_name} : {str(e)}", exc_info=True)
+        return None, "Erreur lors du transfert de l'image vers le serveur Cloud."
 
 
 # ==========================================
 # 3. SERVICES D'AUTHENTIFICATION
 # ==========================================
 
-def register_user(tel, password, nom, prenom, sexe, adresse, matricule, profil_path, permis_path, email=None, postnom=None):
+def register_user(tel, password, nom, prenom, sexe, adresse, matricule, profil_file, permis_file, email=None, postnom=None):
     """
-    Crée un nouvel utilisateur après vérification des doublons et des champs obligatoires.
+    Crée un nouvel utilisateur : génère un UUID, uploade les images sur Cloudinary,
+    puis enregistre les informations en base de données.
     """
     # A. Vérification obligatoire des fichiers images (Profil et Permis)
-    if not profil_path or not str(profil_path).strip():
+    if not profil_file:
         logger.warning("[REGISTRATION REJECTED] Tentative d'inscription sans photo de profil.")
         return None, "La photo de profil est obligatoire"
 
-    if not permis_path or not str(permis_path).strip():
+    if not permis_file:
         logger.warning("[REGISTRATION REJECTED] Tentative d'inscription sans photo de permis.")
         return None, "La photo du permis de conduire est obligatoire"
 
@@ -76,13 +116,38 @@ def register_user(tel, password, nom, prenom, sexe, adresse, matricule, profil_p
         logger.warning(f"[SECURITY ALERT - DUPLICATE MATRICULE] Tentative d'inscription avec un matricule déjà existant : {matricule}")
         return None, GENERIC_REGISTRATION_ERROR
 
-    # C. Préparation des données sécurisées
+    # C. Préparation des variables Cloudinary (Dossier et noms de fichiers)
+    user_uuid = str(uuid.uuid4())[:8]  # On prend les 8 premiers caractères de l'UUID pour garder des URLs propres
+    nom_propre = nom.replace(" ", "_").strip()  # Enlève les espaces pour éviter les erreurs d'URL
+    
+    dossier_utilisateur = f"tako/chauffeurs/{user_uuid}_{nom_propre}"
+    nom_fichier_profil = f"{user_uuid}_{nom_propre}_profil"
+    nom_fichier_permis = f"{user_uuid}_{nom_propre}_permis"
+
+    # D. Téléversement des images sur Cloudinary (Avant l'insertion en base !)
+    profil_url, err_profil = upload_to_cloudinary(
+        profil_file, 
+        folder_name=dossier_utilisateur, 
+        file_name=nom_fichier_profil
+    )
+    if err_profil:
+        return None, f"Photo de profil : {err_profil}"
+
+    permis_url, err_permis = upload_to_cloudinary(
+        permis_file, 
+        folder_name=dossier_utilisateur, 
+        file_name=nom_fichier_permis
+    )
+    if err_permis:
+        return None, f"Photo du permis : {err_permis}"
+
+    # E. Préparation des données sécurisées pour MySQL
     hashed_password = generate_password_hash(password)
-    id_tpcompte = 1 # Rôle par défaut (ex: 1 pour Chauffeur)
+    id_tpcompte = 1  # Rôle par défaut (ex: 1 pour Chauffeur)
     date_creation = datetime.now()
 
     try:
-        # D. Insertion en base de données (Transaction via 'with Database()')
+        # F. Insertion en base de données (Transaction via 'with Database()')
         with Database() as cursor:
             # 1. Insertion de l'utilisateur principal
             query_user = """
@@ -92,21 +157,21 @@ def register_user(tel, password, nom, prenom, sexe, adresse, matricule, profil_p
             cursor.execute(query_user, (email, tel, hashed_password, id_tpcompte, date_creation))
             new_user_id = cursor.lastrowid
 
-            # 2. Insertion des informations du profil
+            # 2. Insertion des informations du profil (stockage des URLs Cloudinary)
             query_info = """
                 INSERT INTO user_info (nom, postnom, prenom, sexe, adresse, matricule, profil, permis, id_user)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            cursor.execute(query_info, (nom, postnom, prenom, sexe, adresse, matricule, profil_path, permis_path, new_user_id))
+            cursor.execute(query_info, (nom, postnom, prenom, sexe, adresse, matricule, profil_url, permis_url, new_user_id))
 
-        logger.info(f"[REGISTRATION SUCCESS] Nouvel utilisateur créé. ID : {new_user_id} | Matricule : {matricule}")
+        logger.info(f"[REGISTRATION SUCCESS] Nouvel utilisateur créé. ID : {new_user_id} | Dossier Cloud : {dossier_utilisateur}")
         return new_user_id, None
 
     except Exception as e:
         logger.error(f"[SYSTEM ERROR] Échec d'insertion en base de données : {str(e)}", exc_info=True)
         return None, "Une erreur système est survenue lors de la création du compte."
 
-
+    
 def login_user(identifier, password):
     """
     Vérifie les accès d'un utilisateur avec protection anti force-brute.

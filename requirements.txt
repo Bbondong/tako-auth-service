@@ -2,3 +2,4 @@ Flask
 pymysql
 python-dotenv
 Werkzeug
+cloudinary
