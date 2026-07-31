@@ -3,6 +3,7 @@ import time
 from flask import Blueprint, jsonify, request
 from werkzeug.utils import secure_filename
 from src.services.auth_service import register_user
+from securite.securite import is_safe_image
 
 # Blueprint dédié uniquement à l'inscription
 register_bp = Blueprint("register", __name__)
@@ -19,49 +20,61 @@ os.makedirs(PERMIS_FOLDER, exist_ok=True)
 
 @register_bp.route("/register", methods=["POST"])
 def register():
-    # 1. Récupération des données texte depuis request.form (pour le multipart/form-data)
+    # 1. Champs texte obligatoires
     tel = request.form.get("tel")
     password = request.form.get("password")
     nom = request.form.get("nom")
     prenom = request.form.get("prenom")
     sexe = request.form.get("sexe")
     adresse = request.form.get("adresse")
-    
+    matricule = request.form.get("matricule")
+
     # Champs optionnels
     email = request.form.get("email")
     postnom = request.form.get("postnom")
 
-    # Vérification des champs obligatoires
-    if not all([tel, password, nom, prenom, sexe, adresse]):
-        return jsonify({"message": "Les champs tel, password, nom, prenom, sexe et adresse sont obligatoires"}), 400
+    # Vérification des champs texte
+    if not all([tel, password, nom, prenom, sexe, adresse, matricule]):
+        return jsonify({
+            "message": "Les champs tel, password, nom, prenom, sexe, adresse et matricule sont obligatoires"
+        }), 400
 
-    # 2. Récupération et sauvegarde des fichiers
+    # 2. Récupération et vérification OBLIGATOIRE des fichiers
     profil_file = request.files.get("profil")
     permis_file = request.files.get("permis")
 
-    # Valeurs par défaut si aucun fichier n'est envoyé
-    profil_path = "default_profil.png"
-    permis_path = "aucun_permis.png"
+    if not profil_file or not profil_file.filename:
+        return jsonify({"message": "La photo de profil est obligatoire"}), 400
 
-    # Sauvegarde de la photo de profil
-    if profil_file and profil_file.filename:
-        filename = f"{int(time.time())}_{secure_filename(profil_file.filename)}"
-        filepath = os.path.join(PROFIL_FOLDER, filename)
-        profil_file.save(filepath)
-        profil_path = filepath  # Chemin à sauvegarder en base
+    if not permis_file or not permis_file.filename:
+        return jsonify({"message": "La photo du permis de conduire est obligatoire"}), 400
 
-    # Sauvegarde de la photo du permis
-    if permis_file and permis_file.filename:
-        filename = f"{int(time.time())}_{secure_filename(permis_file.filename)}"
-        filepath = os.path.join(PERMIS_FOLDER, filename)
-        permis_file.save(filepath)
-        permis_path = filepath
+    # --- Traitement et sauvegarde de la photo de profil ---
+    is_safe_p, result_p = is_safe_image(profil_file)
+    if not is_safe_p:
+        return jsonify({"message": f"Erreur image profil : {result_p}"}), 400
 
-    # 3. Appel du service
+    filename_profil = f"{int(time.time())}_{result_p}"
+    filepath_profil = os.path.join(PROFIL_FOLDER, filename_profil)
+    profil_file.save(filepath_profil)
+    profil_path = f"uploads/profils/{filename_profil}"
+
+    # --- Traitement et sauvegarde de la photo du permis ---
+    is_safe_m, result_m = is_safe_image(permis_file)
+    if not is_safe_m:
+        return jsonify({"message": f"Erreur image permis : {result_m}"}), 400
+
+    filename_permis = f"{int(time.time())}_{result_m}"
+    filepath_permis = os.path.join(PERMIS_FOLDER, filename_permis)
+    permis_file.save(filepath_permis)
+    permis_path = f"uploads/permis/{filename_permis}"
+
+    # 3. Appel du service d'inscription
     user_id, error = register_user(
         tel=tel, password=password, nom=nom, prenom=prenom,
-        sexe=sexe, adresse=adresse, profil_path=profil_path, 
-        permis_path=permis_path, email=email, postnom=postnom
+        sexe=sexe, adresse=adresse, matricule=matricule,
+        profil_path=profil_path, permis_path=permis_path,
+        email=email, postnom=postnom
     )
 
     if error:
