@@ -6,7 +6,7 @@ from werkzeug.utils import secure_filename
 
 # --- PARAMÈTRES WAF & UPLOADS ---
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
-MAX_FILE_SIZE = 5 * 1024 * 1024
+MAX_FILE_SIZE = 10 * 1024 * 1024
 
 # --- GESTION DU RATE LIMITING & BANNISSEMENT ---
 ip_requests = {}
