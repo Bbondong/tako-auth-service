@@ -112,7 +112,7 @@ def register_user(tel, password, nom, prenom, sexe, adresse, matricule, profil_f
         logger.warning(f"[SECURITY ALERT - DUPLICATE EMAIL] Tentative d'inscription avec un email déjà existant : {email}")
         return None, GENERIC_REGISTRATION_ERROR
         
-    if fetch_one("SELECT id_user FROM user_info WHERE matricule = %s", (matricule,)):
+    if fetch_one("SELECT id_user FROM user_info WHERE matricul = %s", (matricule,)):
         logger.warning(f"[SECURITY ALERT - DUPLICATE MATRICULE] Tentative d'inscription avec un matricule déjà existant : {matricule}")
         return None, GENERIC_REGISTRATION_ERROR
 
@@ -159,7 +159,7 @@ def register_user(tel, password, nom, prenom, sexe, adresse, matricule, profil_f
 
             # 2. Insertion des informations du profil (stockage des URLs Cloudinary)
             query_info = """
-                INSERT INTO user_info (nom, postnom, prenom, sexe, adresse, matricule, profil, permis, id_user)
+                INSERT INTO user_info (nom, postnom, prenom, sexe, adresse, matricul, profil, permis, id_user)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             cursor.execute(query_info, (nom, postnom, prenom, sexe, adresse, matricule, profil_url, permis_url, new_user_id))
