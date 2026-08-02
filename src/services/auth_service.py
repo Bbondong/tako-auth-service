@@ -143,7 +143,7 @@ def register_user(tel, password, nom, prenom, sexe, adresse, matricule, profil_f
 
     # E. Préparation des données sécurisées pour MySQL
     hashed_password = generate_password_hash(password)
-    id_tpcompte = 1  # Rôle par défaut (ex: 1 pour Chauffeur)
+    id_tpcompte = 5  # Rôle par défaut (ex: 1 pour Chauffeur)
     date_creation = datetime.now()
 
     try:
