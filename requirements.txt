@@ -3,3 +3,4 @@ pymysql
 python-dotenv
 Werkzeug
 cloudinary
+PyJWT>=2.8,<3

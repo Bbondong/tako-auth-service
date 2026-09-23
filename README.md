@@ -84,3 +84,20 @@ Les contributions sont les bienvenues. Veuillez suivre les directives de contrib
 ## Licence
 
 Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
+
+## API client `/api/v1`
+
+Apply `migrations/001_client_api.sql` to the existing MySQL/MariaDB database, after checking
+that the `user.id_user` column has the same integer type as the migration's foreign keys.
+`user.tel` must have a unique index. Configure `DB_*`, `TAKO_API_KEY`,
+`TAKO_CLIENT_ROLE_ID` (the existing **client** role in `id_tpcompte`) and
+`TAKO_JWT_SECRET` (a random string of at least 32 characters) on the auth service.
+Do not reuse the chauffeur role. Keep the auth service private to the gateway.
+
+The versioned API provides client register/login, `GET /me`, favorite CRUD,
+course creation/list/detail, cargo type catalogue and read-only payment methods.
+Existing `/register` and `/login` for chauffeurs remain separate. A courier or
+admin service must update the course status, driver assignment, location and price;
+new bookings stay `pending` until then. Optional cargo photos use Cloudinary and
+require its environment variables. The role and the existing `user` schema must
+be verified against the live database before applying the migration.
