@@ -101,3 +101,29 @@ admin service must update the course status, driver assignment, location and pri
 new bookings stay `pending` until then. Optional cargo photos use Cloudinary and
 require its environment variables. The role and the existing `user` schema must
 be verified against the live database before applying the migration.
+
+## Positions client et chauffeur (migration 002)
+
+Apply `migrations/002_course_positions.sql` after migration 001. Set
+`TAKO_DRIVER_ROLE_ID` to the **existing driver role** in `user.id_tpcompte`;
+it must differ from `TAKO_CLIENT_ROLE_ID`. Database coordinates are
+`longitude = x`, `latitude = y` (decimal degrees, WGS84). The initial client
+position is inserted atomically with its booking. There is only one current
+position per participant and booking; updates replace it and refresh
+`updated_at`. This is not a GPS history table.
+
+Driver app integration (the driver app is in a separate repository):
+
+1. `POST /api/v1/driver/auth/login` with `identifier` and `password` returns a driver bearer token.
+2. `GET /api/v1/driver/courses/available` lists pending bookings.
+3. `POST /api/v1/driver/courses/{id}/accept` with JSON `{"latitude":-4.32,"longitude":15.31}` assigns that driver atomically and stores the driver's first position. A competing acceptance receives HTTP 409.
+4. Every five seconds while tracking is active, `PUT /api/v1/driver/courses/{id}/position` with the **current** GPS coordinates. The response contains the latest client and driver positions. `GET /api/v1/driver/courses/{id}/positions` provides read-only recovery.
+
+The client uses `PUT /api/v1/courses/{id}/position` at the same cadence and
+reads the same two positions. If GPS is unavailable it uses
+`GET /api/v1/courses/{id}/positions` to display the last recorded location.
+Only the booking's client and the accepted driver may read or write its
+positions. A driver acceptance requires a valid driver token; a client token
+cannot accept bookings. The client app tracks while its tracking screen is
+open; background tracking requires separate mobile OS permissions and a
+background service.

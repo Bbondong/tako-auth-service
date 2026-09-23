@@ -192,13 +192,18 @@ def create_course():
                                                    folder='tako/cargo', resource_type='image')['secure_url']
         except Exception:
             return jsonify(message='Téléversement de la photo impossible.'), 503
-    course_id = execute_query('INSERT INTO courses (user_id,pickup,dropoff,pickup_latitude,pickup_longitude,'
-                              'destination_latitude,destination_longitude,cargo_type,weight,description,'
-                              'length_cm,width_cm,height_cm,is_fragile,is_express,photo_url,status) '
-                              "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')",
-                              (g.user_id, pickup, dropoff, lat1, lon1, lat2, lon2, cargo_type, weight,
-                               description, *dimensions, bool(data.get('is_fragile')),
-                               bool(data.get('is_express')), photo_url))
+    with Database() as cursor:
+        cursor.execute('INSERT INTO courses (user_id,pickup,dropoff,pickup_latitude,pickup_longitude,'
+                       'destination_latitude,destination_longitude,cargo_type,weight,description,'
+                       'length_cm,width_cm,height_cm,is_fragile,is_express,photo_url,status) '
+                       "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')",
+                       (g.user_id, pickup, dropoff, lat1, lon1, lat2, lon2, cargo_type, weight,
+                        description, *dimensions, bool(data.get('is_fragile')),
+                        bool(data.get('is_express')), photo_url))
+        course_id = cursor.lastrowid
+        cursor.execute('INSERT INTO course_positions '
+                       '(course_id, actor, user_id, latitude, longitude) '
+                       "VALUES (%s,'client',%s,%s,%s)", (course_id, g.user_id, lat1, lon1))
     return jsonify(id=course_id, status='pending'), 201
 
 
