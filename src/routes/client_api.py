@@ -57,6 +57,9 @@ def authenticated(fn):
 
 @client_bp.post('/auth/register')
 def register_client():
+    # Validate deployment configuration before inserting a user.
+    _secret()
+    role = _role()
     data = request.get_json(silent=True) or {}
     tel = str(data.get('tel', '')).strip()
     nom = str(data.get('nom', '')).strip()
@@ -71,7 +74,7 @@ def register_client():
     try:
         with Database() as cursor:
             cursor.execute('INSERT INTO user (tel, password, id_tpcompte, date_creation) VALUES (%s,%s,%s,%s)',
-                           (tel, generate_password_hash(password), _role(), datetime.now(timezone.utc)))
+                           (tel, generate_password_hash(password), role, datetime.now(timezone.utc)))
             user_id = cursor.lastrowid
             cursor.execute('INSERT INTO client_profiles (user_id, nom, prenom) VALUES (%s,%s,%s)',
                            (user_id, nom, prenom))
