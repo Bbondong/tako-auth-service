@@ -117,11 +117,14 @@ def update_presence():
     point = _coordinates(data)
     if point is None or not isinstance(data.get('available'), bool):
         return jsonify(message='Position et disponibilité requises.'), 400
-    active = fetch_one("SELECT id FROM courses WHERE driver_user_id=%s "
+    with Database() as cursor:
+        cursor.execute('SELECT driver_user_id FROM driver_presence '
+                       'WHERE driver_user_id=%s FOR UPDATE', (g.user_id,))
+        cursor.execute("SELECT id FROM courses WHERE driver_user_id=%s "
                        "AND status IN ('assigned','arrived','in_transit') LIMIT 1",
                        (g.user_id,))
-    available = data['available'] and active is None
-    with Database() as cursor:
+        active = cursor.fetchone()
+        available = data['available'] and active is None
         cursor.execute(
             'INSERT INTO driver_presence (driver_user_id, latitude, longitude, available) '
             'VALUES (%s,%s,%s,%s) ON DUPLICATE KEY UPDATE '
@@ -177,12 +180,6 @@ def accept_course(course_id):
     point = _coordinates(request.get_json(silent=True) or {})
     if point is None:
         return jsonify(message='Position du chauffeur invalide.'), 400
-    presence = fetch_one(
-        'SELECT latitude, longitude, available, updated_at FROM driver_presence '
-        'WHERE driver_user_id=%s', (g.user_id,))
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    if not presence or not presence['available'] or presence['updated_at'] < now - timedelta(seconds=30):
-        return jsonify(message='Passez en ligne et activez votre position GPS.'), 409
     offer = fetch_one(
         "SELECT pickup_latitude, pickup_longitude FROM courses "
         "WHERE id=%s AND status='pending' AND driver_user_id IS NULL", (course_id,))
@@ -194,6 +191,12 @@ def accept_course(course_id):
     driver_name = ' '.join(str(info.get(key) or '').strip() for key in ('prenom', 'nom')).strip() if info else None
     # Conditional UPDATE arbitrates competing drivers at the database, not in memory.
     with Database() as cursor:
+        cursor.execute('SELECT available, updated_at FROM driver_presence '
+                       'WHERE driver_user_id=%s FOR UPDATE', (g.user_id,))
+        presence = cursor.fetchone()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if not presence or not presence['available'] or presence['updated_at'] < now - timedelta(seconds=30):
+            return jsonify(message='Passez en ligne et activez votre position GPS.'), 409
         changed = cursor.execute("UPDATE courses SET driver_user_id=%s, driver_name=%s, status='assigned' "
                                  "WHERE id=%s AND status='pending' AND driver_user_id IS NULL",
                                  (g.user_id, driver_name, course_id))
@@ -225,7 +228,7 @@ def _update_position(course_id, role):
         owner = course['user_id'] if role == 'client' else course['driver_user_id']
         if owner != g.user_id:
             return jsonify(message='Accès interdit à cette course.'), 403
-        allowed = ('pending', 'assigned', 'in_transit') if role == 'client' else ('assigned', 'in_transit')
+        allowed = ('pending', 'assigned', 'arrived', 'in_transit') if role == 'client' else ('assigned', 'arrived', 'in_transit')
         if course['status'] not in allowed:
             return jsonify(message='Le suivi de cette course est terminé.'), 409
         cursor.execute('INSERT INTO course_positions '
