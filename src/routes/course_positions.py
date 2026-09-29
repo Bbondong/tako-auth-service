@@ -183,6 +183,13 @@ def accept_course(course_id):
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     if not presence or not presence['available'] or presence['updated_at'] < now - timedelta(seconds=30):
         return jsonify(message='Passez en ligne et activez votre position GPS.'), 409
+    offer = fetch_one(
+        "SELECT pickup_latitude, pickup_longitude FROM courses "
+        "WHERE id=%s AND status='pending' AND driver_user_id IS NULL", (course_id,))
+    if not offer:
+        return jsonify(message='Course indisponible.'), 409
+    if _distance_km(*point, offer['pickup_latitude'], offer['pickup_longitude']) > 15:
+        return jsonify(message='Course hors de votre zone de 15 km.'), 409
     info = fetch_one('SELECT nom, prenom FROM user_info WHERE id_user=%s', (g.user_id,))
     driver_name = ' '.join(str(info.get(key) or '').strip() for key in ('prenom', 'nom')).strip() if info else None
     # Conditional UPDATE arbitrates competing drivers at the database, not in memory.
