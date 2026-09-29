@@ -117,14 +117,29 @@ def update_presence():
     point = _coordinates(data)
     if point is None or not isinstance(data.get('available'), bool):
         return jsonify(message='Position et disponibilité requises.'), 400
+    active = fetch_one("SELECT id FROM courses WHERE driver_user_id=%s "
+                       "AND status IN ('assigned','arrived','in_transit') LIMIT 1",
+                       (g.user_id,))
+    available = data['available'] and active is None
     with Database() as cursor:
         cursor.execute(
             'INSERT INTO driver_presence (driver_user_id, latitude, longitude, available) '
             'VALUES (%s,%s,%s,%s) ON DUPLICATE KEY UPDATE '
             'latitude=VALUES(latitude), longitude=VALUES(longitude), '
             'available=VALUES(available), updated_at=CURRENT_TIMESTAMP(3)',
-            (g.user_id, *point, data['available']))
-    return jsonify(available=data['available'])
+            (g.user_id, *point, available))
+    return jsonify(available=available)
+
+
+@positions_bp.get('/driver/courses/active')
+@driver_authenticated
+def active_driver_course():
+    row = fetch_one("SELECT id FROM courses WHERE driver_user_id=%s "
+                    "AND status IN ('assigned','arrived','in_transit') "
+                    "ORDER BY id DESC LIMIT 1", (g.user_id,))
+    if not row:
+        return jsonify(course=None)
+    return _snapshot(_course(row['id'], 'driver'))
 
 
 @positions_bp.get('/driver/courses/available')
