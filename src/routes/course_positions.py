@@ -70,13 +70,18 @@ def _positions(course_id):
 def _course(course_id, role):
     field = 'user_id' if role == 'client' else 'driver_user_id'
     return fetch_one(f'SELECT id, user_id, driver_user_id, status, driver_name, vehicle, '
-                     f'price FROM courses WHERE id=%s AND {field}=%s', (course_id, g.user_id))
+                     f'price, pickup, dropoff, pickup_latitude, pickup_longitude, destination_latitude, '
+                     f'destination_longitude FROM courses WHERE id=%s AND {field}=%s', (course_id, g.user_id))
 
 
 def _snapshot(course):
     return jsonify(course={'id': course['id'], 'status': course['status'],
                            'driver_name': course['driver_name'], 'vehicle': course['vehicle'],
-                           'price': course['price']},
+                           'price': course['price'], 'pickup': course['pickup'], 'dropoff': course['dropoff'],
+                           'pickup_latitude': float(course['pickup_latitude']),
+                           'pickup_longitude': float(course['pickup_longitude']),
+                           'destination_latitude': float(course['destination_latitude']),
+                           'destination_longitude': float(course['destination_longitude'])},
                    positions=_positions(course['id']))
 
 
@@ -100,10 +105,12 @@ def driver_login():
 @positions_bp.get('/driver/courses/available')
 @driver_authenticated
 def available_courses():
-    return jsonify(courses=fetch_all('SELECT id, pickup, dropoff, pickup_latitude, '
-                                    'pickup_longitude, cargo_type, created_at FROM courses '
-                                    "WHERE status='pending' AND driver_user_id IS NULL "
-                                    'ORDER BY created_at DESC LIMIT 100'))
+    return jsonify(courses=fetch_all(
+        'SELECT id, pickup, dropoff, pickup_latitude, pickup_longitude, '
+        'destination_latitude, destination_longitude, cargo_type, weight, '
+        'price, created_at FROM courses '
+        "WHERE status='pending' AND driver_user_id IS NULL "
+        'ORDER BY created_at DESC LIMIT 100'))
 
 
 @positions_bp.post('/driver/courses/<int:course_id>/accept')
@@ -189,3 +196,21 @@ def client_positions(course_id):
 @driver_authenticated
 def driver_positions(course_id):
     return _get_positions(course_id, 'driver')
+
+
+@positions_bp.put('/driver/courses/<int:course_id>/status')
+@driver_authenticated
+def change_driver_course_status(course_id):
+    requested = str((request.get_json(silent=True) or {}).get('status') or '')
+    predecessors = {'arrived': 'assigned', 'in_transit': 'arrived',
+                    'delivered': 'in_transit'}
+    previous = predecessors.get(requested)
+    if not previous:
+        return jsonify(message='Transition de course invalide.'), 400
+    with Database() as cursor:
+        changed = cursor.execute(
+            'UPDATE courses SET status=%s WHERE id=%s AND driver_user_id=%s AND status=%s',
+            (requested, course_id, g.user_id, previous))
+    if not changed:
+        return jsonify(message='Course absente ou statut déjà modifié.'), 409
+    return _snapshot(_course(course_id, 'driver'))
