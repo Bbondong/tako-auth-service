@@ -102,15 +102,58 @@ def driver_login():
     return jsonify(access_token=token, user_id=user['id_user'])
 
 
+def _distance_km(lat1, lon1, lat2, lon2):
+    a1, a2 = math.radians(float(lat1)), math.radians(float(lat2))
+    d_lat = a2 - a1
+    d_lon = math.radians(float(lon2) - float(lon1))
+    h = math.sin(d_lat / 2) ** 2 + math.cos(a1) * math.cos(a2) * math.sin(d_lon / 2) ** 2
+    return 6371 * 2 * math.asin(min(1, math.sqrt(h)))
+
+
+@positions_bp.put('/driver/presence')
+@driver_authenticated
+def update_presence():
+    data = request.get_json(silent=True) or {}
+    point = _coordinates(data)
+    if point is None or not isinstance(data.get('available'), bool):
+        return jsonify(message='Position et disponibilité requises.'), 400
+    with Database() as cursor:
+        cursor.execute(
+            'INSERT INTO driver_presence (driver_user_id, latitude, longitude, available) '
+            'VALUES (%s,%s,%s,%s) ON DUPLICATE KEY UPDATE '
+            'latitude=VALUES(latitude), longitude=VALUES(longitude), '
+            'available=VALUES(available), updated_at=CURRENT_TIMESTAMP(3)',
+            (g.user_id, *point, data['available']))
+    return jsonify(available=data['available'])
+
+
 @positions_bp.get('/driver/courses/available')
 @driver_authenticated
 def available_courses():
-    return jsonify(courses=fetch_all(
+    presence = fetch_one(
+        'SELECT latitude, longitude, available, updated_at FROM driver_presence '
+        'WHERE driver_user_id=%s', (g.user_id,))
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if not presence or not presence['available'] or presence['updated_at'] < now - timedelta(seconds=30):
+        return jsonify(courses=[])
+    latitude, longitude = float(presence['latitude']), float(presence['longitude'])
+    # Bound the SQL scan, then rank by actual great-circle distance.
+    lon_span = 0.15 / max(0.2, math.cos(math.radians(latitude)))
+    rows = fetch_all(
         'SELECT id, pickup, dropoff, pickup_latitude, pickup_longitude, '
         'destination_latitude, destination_longitude, cargo_type, weight, '
         'price, created_at FROM courses '
         "WHERE status='pending' AND driver_user_id IS NULL "
-        'ORDER BY created_at DESC LIMIT 100'))
+        'AND pickup_latitude BETWEEN %s AND %s '
+        'AND pickup_longitude BETWEEN %s AND %s '
+        'ORDER BY created_at DESC LIMIT 200',
+        (latitude - 0.15, latitude + 0.15, longitude - lon_span, longitude + lon_span))
+    for row in rows:
+        row['distance_km'] = round(_distance_km(
+            latitude, longitude, row['pickup_latitude'], row['pickup_longitude']), 1)
+    return jsonify(courses=sorted(
+        (row for row in rows if row['distance_km'] <= 15),
+        key=lambda row: row['distance_km']))
 
 
 @positions_bp.post('/driver/courses/<int:course_id>/accept')
@@ -119,6 +162,12 @@ def accept_course(course_id):
     point = _coordinates(request.get_json(silent=True) or {})
     if point is None:
         return jsonify(message='Position du chauffeur invalide.'), 400
+    presence = fetch_one(
+        'SELECT latitude, longitude, available, updated_at FROM driver_presence '
+        'WHERE driver_user_id=%s', (g.user_id,))
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if not presence or not presence['available'] or presence['updated_at'] < now - timedelta(seconds=30):
+        return jsonify(message='Passez en ligne et activez votre position GPS.'), 409
     info = fetch_one('SELECT nom, prenom FROM user_info WHERE id_user=%s', (g.user_id,))
     driver_name = ' '.join(str(info.get(key) or '').strip() for key in ('prenom', 'nom')).strip() if info else None
     # Conditional UPDATE arbitrates competing drivers at the database, not in memory.
@@ -127,6 +176,8 @@ def accept_course(course_id):
                                  "WHERE id=%s AND status='pending' AND driver_user_id IS NULL",
                                  (g.user_id, driver_name, course_id))
         if changed:
+            cursor.execute('UPDATE driver_presence SET available=0 WHERE driver_user_id=%s',
+                           (g.user_id,))
             cursor.execute('INSERT INTO course_positions '
                            '(course_id, actor, user_id, latitude, longitude) '
                            "VALUES (%s,'driver',%s,%s,%s)",
