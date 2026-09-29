@@ -19,7 +19,9 @@ Le client appelle la Gateway :
 Un code dure cinq minutes, au plus cinq essais, et une nouvelle demande est
 bloquée pendant une minute. Aucun jeton n'est émis par la demande de code.
 La colonne `user.password` héritée reçoit un secret aléatoire inaccessible
-au client ; les routes historiques des chauffeurs restent en place.
+au client ; les routes historiques des chauffeurs restent en place. Les anciennes routes
+client `/api/v1/auth/login` et `/api/v1/auth/register` renvoient 410 :
+déployer l'app client compatible OTP en coordination avec le serveur.
 
 Avant déploiement, vérifier l'unicité de `user.tel` sur la base réelle.
 La migration ne modifie pas cette table héritée.
