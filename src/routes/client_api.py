@@ -5,7 +5,6 @@ from functools import wraps
 
 import jwt
 from flask import Blueprint, g, jsonify, request
-from werkzeug.security import check_password_hash, generate_password_hash
 
 from src.data import Database, execute_query, fetch_all, fetch_one
 
@@ -56,50 +55,9 @@ def authenticated(fn):
 
 
 @client_bp.post('/auth/register')
-def register_client():
-    # Validate deployment configuration before inserting a user.
-    _secret()
-    role = _role()
-    data = request.get_json(silent=True) or {}
-    tel = str(data.get('tel', '')).strip()
-    nom = str(data.get('nom', '')).strip()
-    prenom = str(data.get('prenom', '')).strip()
-    password = data.get('password', '')
-    if not tel or not nom or not prenom or not isinstance(password, str) or len(password) < 8:
-        return jsonify(message='Téléphone, nom, prénom et mot de passe (8 caractères minimum) requis.'), 400
-    if len(tel) > 25 or len(nom) > 100 or len(prenom) > 100:
-        return jsonify(message='Champ trop long.'), 400
-    if fetch_one('SELECT id_user FROM user WHERE tel=%s', (tel,)):
-        return jsonify(message='Ce téléphone est déjà utilisé.'), 409
-    try:
-        with Database() as cursor:
-            cursor.execute('INSERT INTO user (tel, password, id_tpcompte, date_creation) VALUES (%s,%s,%s,%s)',
-                           (tel, generate_password_hash(password), role, datetime.now(timezone.utc)))
-            user_id = cursor.lastrowid
-            cursor.execute('INSERT INTO client_profiles (user_id, nom, prenom) VALUES (%s,%s,%s)',
-                           (user_id, nom, prenom))
-    except Exception:
-        # A concurrent registration can race the duplicate check; unique tel constraint is required.
-        return jsonify(message="Inscription impossible. Vérifiez la configuration et réessayez."), 500
-    return jsonify(user={'id': user_id, 'tel': tel, 'nom': nom, 'prenom': prenom},
-                   access_token=_token(user_id)), 201
-
-
 @client_bp.post('/auth/login')
-def login_client():
-    data = request.get_json(silent=True) or {}
-    tel = str(data.get('tel', '')).strip()
-    password = data.get('password')
-    if not tel or not isinstance(password, str) or not password:
-        return jsonify(message='Téléphone et mot de passe requis.'), 400
-    user = fetch_one('SELECT u.id_user, u.tel, u.password, cp.nom, cp.prenom FROM user u '
-                     'JOIN client_profiles cp ON cp.user_id=u.id_user '
-                     'WHERE u.tel=%s AND u.id_tpcompte=%s', (tel, _role()))
-    if not user or not check_password_hash(user['password'], password):
-        return jsonify(message='Identifiants incorrects.'), 401
-    return jsonify(access_token=_token(user['id_user']),
-                   user={'id': user['id_user'], 'tel': user['tel'],
-                         'nom': user['nom'], 'prenom': user['prenom']})
+def password_client_disabled():
+    return jsonify(message='Utilisez la vérification par SMS pour accéder au compte.'), 410
 
 
 @client_bp.get('/me')
