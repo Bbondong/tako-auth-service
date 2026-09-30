@@ -127,3 +127,10 @@ positions. A driver acceptance requires a valid driver token; a client token
 cannot accept bookings. The client app tracks while its tracking screen is
 open; background tracking requires separate mobile OS permissions and a
 background service.
+
+## Authentification téléphone Firebase
+
+`POST /api/v1/auth/firebase-login` échange un ID token Firebase validé contre
+le JWT client Tako. Voir [Configuration Firebase](docs/firebase_auth.md) et
+`.env.example` pour le compte de service privé et les tests. Les routes
+chauffeur et l'ancien OTP sont conservés.
