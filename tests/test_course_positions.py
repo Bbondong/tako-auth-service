@@ -18,6 +18,18 @@ class Cursor:
 
     def execute(self, sql, params):
         course = self.state['course']
+        if sql.startswith('SELECT available, updated_at FROM driver_presence'):
+            self.result = self.state['presence']
+            return 1
+        if sql.startswith('UPDATE driver_presence SET available=0'):
+            self.state['presence']['available'] = 0
+            return 1
+        if sql.startswith('UPDATE courses SET status='):
+            status, course_id, driver_id, previous = params
+            if course_id == course['id'] and driver_id == course['driver_user_id'] and course['status'] == previous:
+                course['status'] = status
+                return 1
+            return 0
         if sql.startswith('UPDATE courses SET driver_user_id='):
             assert "WHERE id=%s AND status='pending' AND driver_user_id IS NULL" in sql
             driver_id, name, course_id = params
@@ -84,12 +96,19 @@ class TestPositions(unittest.TestCase):
     def setUp(self):
         self.state = {'course': {'id': 4, 'user_id': 10, 'driver_user_id': None,
                                  'driver_name': None, 'vehicle': None, 'price': None,
-                                 'status': 'pending'}, 'positions': {}}
+                                 'status': 'pending', 'pickup': 'A', 'dropoff': 'B',
+                                 'pickup_latitude': -4.32, 'pickup_longitude': 15.31,
+                                 'destination_latitude': -4.31, 'destination_longitude': 15.32},
+                      'positions': {},
+                      'presence': {'available': 1, 'updated_at': datetime.now()}}
         class Database:
             def __enter__(_): return Cursor(self.state)
             def __exit__(_, *exc): return False
         self.module.Database = Database
         def fetch_one(sql, params):
+            if 'FROM driver_presence' in sql: return self.state['presence']
+            if 'SELECT pickup_latitude, pickup_longitude FROM courses' in sql:
+                return self.state['course'] if self.state['course']['status'] == 'pending' else None
             if 'FROM user_info' in sql: return {'prenom': 'Jean', 'nom': 'Test'}
             if 'SELECT id FROM courses' in sql:
                 return {'id': 4} if params[0] == 4 else None
@@ -130,6 +149,19 @@ class TestPositions(unittest.TestCase):
         response, status = self.module._update_position(4, 'client')
         self.assertEqual(status, 403)
         self.assertNotIn('client', self.state['positions'])
+
+    def test_status_transitions_are_ordered(self):
+        self.flask.g.user_id = 7
+        self.module.accept_course.__wrapped__(4)
+        self.flask.request.get_json = lambda silent=True: {'status': 'delivered'}
+        response, status = self.module.change_driver_course_status.__wrapped__(4)
+        self.assertEqual(status, 409)
+        self.flask.request.get_json = lambda silent=True: {'status': 'arrived'}
+        response = self.module.change_driver_course_status.__wrapped__(4)
+        self.assertEqual(response['course']['status'], 'arrived')
+        self.flask.request.get_json = lambda silent=True: {'status': 'in_transit'}
+        response = self.module.change_driver_course_status.__wrapped__(4)
+        self.assertEqual(response['course']['status'], 'in_transit')
 
     def test_invalid_coordinates_rejected(self):
         self.assertIsNone(self.module._coordinates({'latitude': float('nan'), 'longitude': 0}))
