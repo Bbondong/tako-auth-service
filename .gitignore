@@ -4,3 +4,10 @@
 # fichier venv
 /venv
 
+# Private Firebase Admin credentials (server only)
+firebase-service-account*.json
+**/firebase-service-account*.json
+/secrets/
+__pycache__/
+*.pyc
+

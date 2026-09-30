@@ -100,7 +100,12 @@ def init_security(app):
 
         if request.is_json:
             try:
-                data = str(request.get_json(silent=True))
+                payload = request.get_json(silent=True)
+                # Signed JWT data is opaque base64url and may legitimately contain --.
+                # This exact endpoint verifies id_token through Firebase Admin.
+                if request.path == '/api/v1/auth/firebase-login' and isinstance(payload, dict):
+                    payload = {key: value for key, value in payload.items() if key != 'id_token'}
+                data = str(payload)
                 if check_sqli(data):
                     return jsonify({"error": "Requête malveillante détectée. IP pénalisée."}), 400
             except Exception:

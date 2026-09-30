@@ -62,6 +62,7 @@ class Cursor:
 class TestPositions(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.saved_modules = {name: sys.modules.get(name) for name in ['flask', 'jwt', 'src.data', 'src.routes.client_api', 'src.services.auth_service', 'src.routes.course_positions']}
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         flask = types.ModuleType('flask')
         flask.g = types.SimpleNamespace(user_id=None)
@@ -92,6 +93,15 @@ class TestPositions(unittest.TestCase):
         data.fetch_all = lambda *args: []
         cls.module = importlib.import_module('src.routes.course_positions')
         cls.flask = flask
+
+    @classmethod
+    def tearDownClass(cls):
+        # Restore dependencies so these isolated tests can coexist with Flask tests.
+        for name, module in cls.saved_modules.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
 
     def setUp(self):
         self.state = {'course': {'id': 4, 'user_id': 10, 'driver_user_id': None,
@@ -171,3 +181,4 @@ class TestPositions(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

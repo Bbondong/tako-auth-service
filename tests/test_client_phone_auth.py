@@ -10,6 +10,7 @@ from datetime import datetime
 class TestPhoneAuth(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.saved_modules = {name: sys.modules.get(name) for name in ['flask', 'werkzeug', 'werkzeug.security', 'src.data', 'src.routes.client_api', 'src.routes.client_phone_auth']}
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         flask = types.ModuleType('flask')
         flask.request = types.SimpleNamespace(get_json=lambda silent=True: {})
@@ -35,6 +36,15 @@ class TestPhoneAuth(unittest.TestCase):
         sys.modules['src.routes.client_api'] = api
         cls.module = importlib.import_module('src.routes.client_phone_auth')
         cls.flask = flask
+
+    @classmethod
+    def tearDownClass(cls):
+        # Restore dependencies so these isolated tests can coexist with Flask tests.
+        for name, module in cls.saved_modules.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
 
     def setUp(self):
         self.codes = {}
@@ -110,3 +120,4 @@ class TestPhoneAuth(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
