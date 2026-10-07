@@ -68,6 +68,17 @@ def me():
     return jsonify(user=user)
 
 
+@client_bp.put('/me')
+@authenticated
+def update_me():
+    data = request.get_json(silent=True) or {}
+    nom, prenom = str(data.get('nom') or '').strip(), str(data.get('prenom') or '').strip()
+    if not prenom or len(nom) > 100 or len(prenom) > 100:
+        return jsonify(message='Prénom requis.'), 422
+    execute_query('UPDATE user_info SET nom=%s, prenom=%s WHERE id_user=%s', (nom, prenom, g.user_id))
+    return me()
+
+
 @client_bp.route('/favorites', methods=['GET', 'POST'])
 @authenticated
 def favorites():
