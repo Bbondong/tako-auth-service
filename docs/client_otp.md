@@ -7,14 +7,22 @@ mysql -h "$DB_HOST" -u "$DB_USER" -p "$DB_NAME" < migrations/003_client_phone_co
 ```
 
 Configurer `TAKO_JWT_SECRET` (au moins 32 caractères), `TAKO_CLIENT_ROLE_ID`,
-`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` et `TWILIO_FROM_NUMBER` dans
-le service d'authentification. Le numéro Twilio doit pouvoir envoyer vers le
-pays du client. Ne jamais placer ces secrets dans Flutter ni dans Git.
+et `WHATSAPP_API_SECRET` dans le service d'authentification. Le code est
+envoyé par WhatsApp via `POST https://benbot.alwaysdata.net/send-otp`
+(numéro sans `+`). Ne jamais placer ces secrets dans Flutter ni dans Git.
+
+Migration à exécuter aussi : `migrations/005_user_active.sql` (colonne
+`user.active`, `1` par défaut pour les comptes existants).
 
 Le client appelle la Gateway :
-- `POST /api/v1/auth/otp/request` avec `{"tel":"+243..." }` : réponse 202.
-- `POST /api/v1/auth/otp/verify` avec `{"tel":"+243...","code":"123456"}`
-  et, pour un nouveau compte, `nom` et `prenom` : jeton client.
+- `POST /api/v1/auth/otp/register` avec `{"tel":"+243...","nom":"..","prenom":"..","sexe":"M"}` :
+  crée le compte **inactif** et envoie le code à 6 chiffres par WhatsApp (202).
+- `POST /api/v1/auth/otp/request` avec `{"tel":"+243..."}` : renvoie un code à un
+  compte existant (connexion). 404 si le numéro n'est pas inscrit.
+- `POST /api/v1/auth/otp/verify-code` (alias `/verify`) avec
+  `{"tel":"+243...","code":"123456"}` : si le code est bon, le compte passe à
+  `active=1` et le jeton client est renvoyé. Un compte inactif ne peut utiliser
+  aucune route authentifiée.
 
 Un code dure cinq minutes, au plus cinq essais, et une nouvelle demande est
 bloquée pendant une minute. Aucun jeton n'est émis par la demande de code.

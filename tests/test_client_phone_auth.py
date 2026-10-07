@@ -61,14 +61,27 @@ class TestPhoneAuth(unittest.TestCase):
                     state.codes[params[0]]['attempts'] += 1
                 elif sql.startswith('DELETE FROM client_phone_codes'):
                     state.codes.pop(params[0], None)
+                elif sql.startswith('SELECT id_user, active'):
+                    u = state.users.get(params[0])
+                    self.result = {'id_user': u['id_user'], 'active': u['active']} if u else None
+                elif sql.startswith('SELECT id_user FROM user'):
+                    u = state.users.get(params[0])
+                    self.result = {'id_user': u['id_user']} if u else None
                 elif sql.startswith('SELECT u.id_user'):
                     self.result = state.users.get(params[0])
                 elif sql.startswith('INSERT INTO user '):
                     self.lastrowid = 10
-                    state.users[params[0]] = {'id_user': 10, 'nom': None, 'prenom': None}
-                elif sql.startswith('INSERT INTO client_profiles'):
-                    user_id, nom, prenom = params
+                    state.inserted_role = params[2]
+                    state.users[params[0]] = {'id_user': 10, 'nom': None, 'prenom': None,
+                                              'profil': None, 'active': 0}
+                elif sql.startswith('INSERT INTO user_info'):
+                    nom, postnom, prenom, sexe, adresse, matricul, profil, permis, user_id = params
+                    state.driver_fields = (postnom, sexe, adresse, matricul, permis)
                     state.users[next(iter(state.users))].update(nom=nom, prenom=prenom)
+                elif sql.startswith('UPDATE user SET active=1'):
+                    for u in state.users.values():
+                        if u['id_user'] == params[0]:
+                            u['active'] = 1
                 else:
                     raise AssertionError(sql)
             def fetchone(self): return self.result
@@ -77,32 +90,50 @@ class TestPhoneAuth(unittest.TestCase):
             def __exit__(self, *args): return False
         self.module.Database = Database
 
-    def test_new_client_requires_code_then_profile(self):
+    def test_register_inactive_until_code_verified(self):
         tel = '+243812345678'
-        self.payload = {'tel': tel}
-        result, status = self.module.request_code()
+        self.payload = {'tel': tel, 'nom': 'K', 'prenom': 'B'}
+        result, status = self.module.register()
         self.assertEqual(status, 202)
         self.assertEqual(self.sms[0][0], tel)
-        self.payload['code'] = '000000'
+        self.assertRegex(self.sms[0][1], r'^[0-9]{6}$')
+        self.assertEqual(self.users[tel]['active'], 0)
+        self.assertEqual(self.inserted_role, 2)
+        self.assertEqual(self.driver_fields, (None, 'M', 'client-10', 'client-10', 'client-10'))
+        self.payload = {'tel': tel, 'code': '000000'}
         result, status = self.module.verify_code()
         self.assertEqual(status, 401)
+        self.assertEqual(self.users[tel]['active'], 0)
         self.payload['code'] = self.sms[0][1]
-        result, status = self.module.verify_code()
-        self.assertEqual(status, 422)
-        self.payload.update(nom='K', prenom='B')
         result = self.module.verify_code()
         self.assertEqual(result['access_token'], 'token:10')
         self.assertEqual(result['user']['nom'], 'K')
+        self.assertEqual(self.users[tel]['active'], 1)
         self.assertNotIn(tel, self.codes)
         result, status = self.module.verify_code()
         self.assertEqual(status, 401)
 
-    def test_cooldown_and_phone_validation(self):
+    def test_register_rejects_active_number_and_missing_name(self):
+        tel = '+243812345678'
+        self.payload = {'tel': tel}
+        result, status = self.module.register()
+        self.assertEqual(status, 422)
+        self.users[tel] = {'id_user': 3, 'active': 1}
+        self.payload = {'tel': tel, 'nom': 'K', 'prenom': 'B'}
+        result, status = self.module.register()
+        self.assertEqual(status, 409)
+        self.assertEqual(self.sms, [])
+
+    def test_request_unknown_number_and_cooldown(self):
         self.payload = {'tel': '12345'}
         result, status = self.module.request_code()
         self.assertEqual(status, 400)
-        self.payload = {'tel': '+243812345678'}
-        self.module.request_code()
+        tel = '+243812345678'
+        self.payload = {'tel': tel}
+        result, status = self.module.request_code()
+        self.assertEqual(status, 404)
+        self.payload = {'tel': tel, 'nom': 'K', 'prenom': 'B'}
+        self.module.register()
         result, status = self.module.request_code()
         self.assertEqual(status, 429)
         self.assertEqual(len(self.sms), 1)

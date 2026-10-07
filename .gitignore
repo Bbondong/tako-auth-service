@@ -4,3 +4,6 @@
 # fichier venv
 /venv
 
+
+# environnement virtuel local
+/.venv

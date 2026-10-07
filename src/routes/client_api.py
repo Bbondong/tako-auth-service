@@ -43,7 +43,7 @@ def authenticated(fn):
             user_id = int(claims['sub'])
             if user_id <= 0 or claims.get('role') != 'client':
                 raise ValueError('invalid subject')
-            user = fetch_one('SELECT id_user FROM user WHERE id_user=%s AND id_tpcompte=%s',
+            user = fetch_one('SELECT id_user FROM user WHERE id_user=%s AND id_tpcompte=%s AND active=1',
                              (user_id, _role()))
             if not user:
                 return jsonify(message='Compte introuvable.'), 401
@@ -63,8 +63,8 @@ def password_client_disabled():
 @client_bp.get('/me')
 @authenticated
 def me():
-    user = fetch_one('SELECT u.id_user AS id, u.tel, cp.nom, cp.prenom FROM user u '
-                     'JOIN client_profiles cp ON cp.user_id=u.id_user WHERE u.id_user=%s', (g.user_id,))
+    user = fetch_one('SELECT u.id_user AS id, u.tel, ui.nom, ui.prenom, ui.profil FROM user u '
+                     'LEFT JOIN user_info ui ON ui.id_user=u.id_user WHERE u.id_user=%s', (g.user_id,))
     return jsonify(user=user)
 
 
