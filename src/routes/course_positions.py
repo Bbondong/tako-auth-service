@@ -71,17 +71,31 @@ def _course(course_id, role):
     field = 'user_id' if role == 'client' else 'driver_user_id'
     return fetch_one(f'SELECT id, user_id, driver_user_id, status, driver_name, vehicle, '
                      f'price, pickup, dropoff, pickup_latitude, pickup_longitude, destination_latitude, '
-                     f'destination_longitude FROM courses WHERE id=%s AND {field}=%s', (course_id, g.user_id))
+                     f'destination_longitude, cargo_type, weight, description, is_fragile, is_express, '
+                     f'created_at FROM courses WHERE id=%s AND {field}=%s', (course_id, g.user_id))
+
+
+def _optional_float(value):
+    return float(value) if value is not None else None
 
 
 def _snapshot(course):
+    created_at = course.get('created_at')
     return jsonify(course={'id': course['id'], 'status': course['status'],
                            'driver_name': course['driver_name'], 'vehicle': course['vehicle'],
-                           'price': course['price'], 'pickup': course['pickup'], 'dropoff': course['dropoff'],
+                           'price': _optional_float(course['price']),
+                           'pickup': course['pickup'], 'dropoff': course['dropoff'],
                            'pickup_latitude': float(course['pickup_latitude']),
                            'pickup_longitude': float(course['pickup_longitude']),
                            'destination_latitude': float(course['destination_latitude']),
-                           'destination_longitude': float(course['destination_longitude'])},
+                           'destination_longitude': float(course['destination_longitude']),
+                           'cargo_type': course.get('cargo_type'),
+                           'weight': _optional_float(course.get('weight')),
+                           'description': course.get('description'),
+                           'is_fragile': bool(course.get('is_fragile')),
+                           'is_express': bool(course.get('is_express')),
+                           'created_at': created_at.isoformat()
+                           if isinstance(created_at, datetime) else created_at},
                    positions=_positions(course['id']))
 
 
@@ -160,6 +174,7 @@ def available_courses():
     rows = fetch_all(
         'SELECT id, pickup, dropoff, pickup_latitude, pickup_longitude, '
         'destination_latitude, destination_longitude, cargo_type, weight, '
+        'description, is_fragile, is_express, length_cm, width_cm, height_cm, '
         'price, created_at FROM courses '
         "WHERE status='pending' AND driver_user_id IS NULL "
         'AND pickup_latitude BETWEEN %s AND %s '

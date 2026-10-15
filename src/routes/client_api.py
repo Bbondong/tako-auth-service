@@ -114,9 +114,13 @@ def delete_favorite(favorite_id):
 @client_bp.get('/courses')
 @authenticated
 def courses():
+    # Coordinates let the app draw history entries on the map without one
+    # extra request per course.
     return jsonify(courses=fetch_all('SELECT id, pickup, dropoff, price, status, driver_name, vehicle, '
-                                    'created_at FROM courses WHERE user_id=%s ORDER BY created_at DESC',
-                                    (g.user_id,)))
+                                    'pickup_latitude, pickup_longitude, destination_latitude, '
+                                    'destination_longitude, cargo_type, weight, description, '
+                                    'is_fragile, is_express, created_at FROM courses '
+                                    'WHERE user_id=%s ORDER BY created_at DESC', (g.user_id,)))
 
 
 @client_bp.route('/courses', methods=['POST'])
@@ -145,6 +149,14 @@ def create_course():
         except (ValueError, TypeError):
             return jsonify(message='Dimensions invalides.'), 400
     description = str(data.get('description') or '').strip()[:2000]
+    vehicle = str(data.get('vehicle') or '').strip()[:200] or None
+    price = data.get('price')
+    try:
+        price = float(price) if price is not None else None
+        if price is not None and (not math.isfinite(price) or price <= 0 or price > 100_000_000):
+            raise ValueError()
+    except (ValueError, TypeError):
+        return jsonify(message='Prix invalide.'), 400
     photo_url = None
     if data.get('photo_base64'):
         import base64
@@ -164,16 +176,30 @@ def create_course():
     with Database() as cursor:
         cursor.execute('INSERT INTO courses (user_id,pickup,dropoff,pickup_latitude,pickup_longitude,'
                        'destination_latitude,destination_longitude,cargo_type,weight,description,'
-                       'length_cm,width_cm,height_cm,is_fragile,is_express,photo_url,status) '
-                       "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')",
+                       'length_cm,width_cm,height_cm,is_fragile,is_express,photo_url,vehicle,price,status) '
+                       "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')",
                        (g.user_id, pickup, dropoff, lat1, lon1, lat2, lon2, cargo_type, weight,
                         description, *dimensions, bool(data.get('is_fragile')),
-                        bool(data.get('is_express')), photo_url))
+                        bool(data.get('is_express')), photo_url, vehicle, price))
         course_id = cursor.lastrowid
         cursor.execute('INSERT INTO course_positions '
                        '(course_id, actor, user_id, latitude, longitude) '
                        "VALUES (%s,'client',%s,%s,%s)", (course_id, g.user_id, lat1, lon1))
     return jsonify(id=course_id, status='pending'), 201
+
+
+@client_bp.post('/courses/<int:course_id>/cancel')
+@authenticated
+def cancel_course(course_id):
+    # Conditional UPDATE: a driver changing the status concurrently wins or loses atomically.
+    with Database() as cursor:
+        changed = cursor.execute("UPDATE courses SET status='cancelled' WHERE id=%s AND user_id=%s "
+                                 "AND status IN ('pending','assigned')", (course_id, g.user_id))
+    if not changed:
+        if not fetch_one('SELECT id FROM courses WHERE id=%s AND user_id=%s', (course_id, g.user_id)):
+            return jsonify(message='Course introuvable.'), 404
+        return jsonify(message='Cette course ne peut plus être annulée.'), 409
+    return jsonify(id=course_id, status='cancelled')
 
 
 @client_bp.get('/courses/<int:course_id>')
